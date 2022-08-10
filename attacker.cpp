@@ -2,6 +2,7 @@
 #include <psapi.h>
 #include <processthreadsapi.h>
 #include <handleapi.h>
+#include <errhandlingapi.h>
 
 #include <iostream>
 #include <cstdio>
@@ -52,15 +53,25 @@ int printAllProcesses() {
 // TODO (not working yet)
 int* getValueAddress(DWORD targetProcessId) {
     HANDLE processHandle;
+    MEMORY_BASIC_INFORMATION resultContainer = {};
 
     // Opening the process to get the starting memory address
-    processHandle = OpenProcess(PROCESS_QUERY_INFORMATION, false, processId);
+    processHandle = OpenProcess(PROCESS_QUERY_INFORMATION, false, targetProcessId);
 
-    if (ReadProcessMemory(processHandle, NULL, processName, processNameSize) == 0) {
+    int processNameSize = 300;
+    CHAR processName[processNameSize];
+    if (GetModuleFileNameExA(processHandle, NULL, processName, processNameSize) != 0) {
+        cout << "Found process " << processName << " at address " << targetProcessId << " OK" << endl;
+    }
+
+    if (VirtualQueryEx(processHandle, NULL, &resultContainer, sizeof(resultContainer)) == 0) {
         return NULL;
     }
 
     CloseHandle(processHandle);
+
+    // Returning random non-null pointer
+    return (int*) malloc(sizeof(int));
 }
 
 
@@ -70,20 +81,30 @@ int main()
         return 1;
     }
 
+    printf("Please enter the process ID you want to analyze the memory from\n>>> ");
+
+    // Reading input and parsing it to a `long long`
     char input[16];
-    cout << "Please enter the process ID you want to analyze the memory from\n>>> " << endl;
+    fgets(input, 16, stdin);
+    unsigned long long targetProcessId = atoll(input);
 
-    while (fgets(input, 16, stdin) == NULL) {
-        cout << "Wrong input." << endl;
-    }
-
-    int targetProcessId;
-    do {
+    // While the user input is not numeric
+    while (targetProcessId == 0) {
+        printf("Wrong input.\n>>> ");
         fgets(input, 16, stdin);
         targetProcessId = atoi(input);
-    } while (targetProcessId == 0);
+    }
 
-    int* address = getValueAddress(targetProcessId);
+    int* address = getValueAddress((DWORD) targetProcessId);
+
+    // Get address: failed case
+    if (address == NULL) {
+        printf("Failed to get the base memory address of the process %llu", targetProcessId);
+        printf(" (error code: %d).\n", GetLastError());
+        return 1;
+    }
+
+    // Else: do stuff here
 
 
     return 0;
