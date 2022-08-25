@@ -1,8 +1,9 @@
-#include <memoryapi.h>
+#include <windows.h>
+// #include <memoryapi.h>
 #include <psapi.h>
-#include <processthreadsapi.h>
-#include <handleapi.h>
-#include <errhandlingapi.h>
+// #include <processthreadsapi.h>
+// #include <handleapi.h>
+// #include <errhandlingapi.h>
 
 #include <iostream>
 #include <cstdio>
@@ -13,14 +14,30 @@
 using namespace std;
 
 
+typedef struct _infoNode {
+    MEMORY_BASIC_INFORMATION* info;
+    struct _infoNode* next;
+} InfoNode;
+
+
+typedef struct _addressNode {
+    LPCVOID address;
+    struct _addressNode* next;
+} AddressNode;
+
+
+
 char* formatBytes(unsigned long long bytes)
 {
-    char* result = (char*) malloc(sizeof(char) * 12);
+    char* result = (char*) malloc(sizeof(char) * 16);
+    if (result == NULL) return NULL;
+
     if (bytes == 0) {
         sprintf(result, "0 Bytes");
     } else {
-        char sizes[][6] = {"Bytes", "kB", "MB", "GB", "TB", "PB"};
+        char sizes[][6] = { "Bytes", "kB", "MB", "GB", "TB", "PB" };
         int i = (int) (log(bytes) / log(1024.0));
+
         sprintf(result, "%.2f %s", bytes / pow(1024, i), sizes[i]);
     }
 
@@ -32,7 +49,7 @@ char* formatBytes(unsigned long long bytes)
 void printProcessName(DWORD processId)
 {
     int i;
-    int processPathSize = 300;
+    const int processPathSize = 300;
     CHAR processPath[processPathSize];
     HANDLE processHandle;
 
@@ -47,13 +64,13 @@ void printProcessName(DWORD processId)
     // Finding the first occurence of `\`
     for (i = strlen(processPath) - 1; processPath[i] != '\\' && i >= 0; i--);
 
-    printf("------- @%ld\t%s\n", processId, &processPath[i+1]);
+    printf("------- @%ld\t%s\n", processId, processPath + i + 1);
 }
 
 
-int printAllProcesses()
+int listAllProcesses()
 {
-    DWORD processList[1024], amountReturned;  // 1024 DWORD x 4 = 4.096 kB, !! 1 DWORD = 4 bytes !!
+    DWORD processList[1024], amountReturned;  //!! 1 DWORD = 4 bytes !! 1024 DWORD x 4 bytes = 4.096 kB !!
 
     if (EnumProcesses(processList, sizeof(processList), &amountReturned) == false) {
         return false;
@@ -61,7 +78,7 @@ int printAllProcesses()
 
     int found = amountReturned / sizeof(DWORD);
 
-    cout << "End of scan, " << found << " processes found:" << endl;
+    printf("End of scan, %d processes found:\n", found);
 
     for (DWORD i = 0; i < (DWORD) found; i++) {
         DWORD processId = processList[i];
@@ -78,36 +95,36 @@ unsigned long printProcessModule(MEMORY_BASIC_INFORMATION info)
     unsigned long memUsage = 0;
 
     char* size = formatBytes(info.RegionSize / 1024.0);
-    printf("0x%p (%s)      \t", info.BaseAddress, size);
+    printf("0x%p (%s)     \t", info.BaseAddress, size);
     free(size);
 
     switch (info.State)
     {
-        case MEM_COMMIT:
-            printf("Committed"); break;
+    case MEM_COMMIT:
+        printf("Committed"); break;
 
-        case MEM_RESERVE:
-            printf("Reserved"); break;
+    case MEM_RESERVE:
+        printf("Reserved "); break;
 
-        case MEM_FREE:
-            printf("Free    "); break;
+    case MEM_FREE:
+        printf("Free     "); break;
     }
 
     printf("\t");
 
     switch (info.Type)
     {
-        case MEM_IMAGE:
-            printf("Image  "); break;
+    case MEM_IMAGE:
+        printf("Image    "); break;
 
-        case MEM_MAPPED:
-            printf("Section"); break;
+    case MEM_MAPPED:
+        printf("Section  "); break;
 
-        case MEM_PRIVATE:
-            printf("Private"); break;
+    case MEM_PRIVATE:
+        printf("Private  "); break;
 
-        default:
-            printf("%lx", info.Type); break;
+    default:
+        printf("0x%lx", info.Type); break;
     }
 
     if (info.State == MEM_COMMIT && (info.AllocationProtect == PAGE_READWRITE || info.AllocationProtect == PAGE_READONLY))
@@ -146,43 +163,65 @@ unsigned long printProcessMemory(DWORD targetPid, unsigned long* totalMemUsage)
 }
 
 
-// TODO (not working yet)
-/* 
-int* scanForValueAddress(DWORD targetPid)
+void printSelectedModules(InfoNode* info)
 {
-    HANDLE processHandle;
+    while (info != NULL) {
+        printProcessModule(*(info->info));
+        info = info->next;
+    }
+}
 
-    // Opening the process to get the starting memory address
-    processHandle = OpenProcess(PROCESS_QUERY_INFORMATION, false, targetPid);
 
-    int processPathSize = 300;
-    CHAR processPath[processPathSize];
+InfoNode* createProcessInfoNode(MEMORY_BASIC_INFORMATION info)
+{
+    InfoNode* node = (InfoNode*) malloc(sizeof(InfoNode));
+    if (node == NULL) return NULL;
 
-    if (VirtualQueryEx(processHandle, NULL, &resultContainer, sizeof(resultContainer)) == 0) {
-        return NULL;
+    node->info = (MEMORY_BASIC_INFORMATION*) malloc(sizeof(MEMORY_BASIC_INFORMATION));
+    if (node->info == NULL) return NULL;
+
+    // Copying the MEM._BASIC_INFO block
+    node->info->BaseAddress = info.BaseAddress;
+    node->info->AllocationBase = info.AllocationBase;
+    node->info->AllocationProtect = info.AllocationProtect;
+    node->info->PartitionId = info.PartitionId;
+    node->info->RegionSize = info.RegionSize;
+    node->info->State = info.State;
+    node->info->Protect = info.Protect;
+    node->info->Type = info.Type;
+
+    node->next = NULL;
+
+    return node;
+}
+
+AddressNode* createAddressNode(LPCVOID address)
+{
+    AddressNode* node = (AddressNode*) malloc(sizeof(AddressNode));
+
+    if (node != NULL) {
+        node->next = NULL;
     }
 
-    CloseHandle(processHandle);
-
-    printf("Base address: %p\nAllocation base address (?): %p\nAllocation protection: %lu\nPartition ID: %d\nRegion size: %llu\nState: 0x%lx\nProtect: %lx\nType: %lx\n",
-            resultContainer.BaseAddress, resultContainer.AllocationBase, resultContainer.AllocationProtect, resultContainer.PartitionId,
-            resultContainer.RegionSize, resultContainer.State, resultContainer.Protect, resultContainer.Type);
-
-    // Returning random non-null pointer
-    return (int*) malloc(sizeof(int));
+    return node;
 }
-*/
 
 
+void freeInfoNode(InfoNode* node)
+{
+    free(node->info);
+    free(node);
+}
 
-unsigned long long readLLUserInput(const char text[])
+
+long long readLLUserInput(const char text[])
 {
     printf("%s\n>>> ", text);
 
     // Reading input and parsing it to a `long long`
     char input[16];
     fgets(input, 16, stdin);
-    unsigned long long parsed = atoll(input);
+    long long parsed = atoll(input);
 
     // While the user input is not numeric
     while (parsed == 0) {
@@ -195,36 +234,134 @@ unsigned long long readLLUserInput(const char text[])
 }
 
 
+
+
+void printAddresses(AddressNode* addr)
+{
+    printf("Possible addresses:\n");
+    while (addr != NULL) {
+        printf("\t- 0x%p\n", addr->address);
+        addr = addr->next;
+    }
+}
+
+
+AddressNode* scanMemoryForValue(DWORD targetPid, InfoNode* modules, int value, int readableModulesCount)
+{
+    AddressNode* addresses = NULL;
+    AddressNode* newAddress;
+
+    HANDLE processHandle = OpenProcess(PROCESS_VM_READ, false, targetPid);
+    int buffer[12];
+    size_t NumberOfBytesRead;
+
+    int count = 0;
+
+    // Iterating over all readable modules
+    while (modules != NULL) {
+        for (LPVOID address = modules->info->BaseAddress; ReadProcessMemory(processHandle, (LPVOID) address[i], (LPVOID) buffer, sizeof(value), &NumberOfBytesRead) != 0; address = (LPVOID) (address + sizeof(int))) {            
+            // address < ((uint8_t*) modules->info->BaseAddress + modules->info->RegionSize);
+
+            // Found the value somewhere!
+            if (value == *buffer) {
+                // Append to linked list
+                newAddress = createAddressNode(address);
+                newAddress->next = addresses;
+                addresses = newAddress;
+            }
+        }
+
+        printf("Scanned module %d/%d\r", count, readableModulesCount);
+        count++;
+
+        modules = modules->next;
+    }
+    printf("\n");
+
+
+    CloseHandle(processHandle);
+
+    return addresses;
+}
+
+
+
+InfoNode* getReadableModules(DWORD targetPid, unsigned long* modulesCount, unsigned long* totalMemUsage, unsigned long* readableModulesCount)
+{
+    HANDLE processHandle;
+    MEMORY_BASIC_INFORMATION resultContainer = {};
+
+    unsigned char* startingPoint;
+    InfoNode* newNode, * node = NULL;
+
+    *readableModulesCount = 0;
+    *modulesCount = 0;
+    *totalMemUsage = 0;
+
+    // Opening the process to get the starting memory address
+    processHandle = OpenProcess(PROCESS_QUERY_INFORMATION, false, targetPid);
+    int code = 1;
+
+    for (startingPoint = NULL; code != 0; startingPoint += resultContainer.RegionSize) {
+        code = VirtualQueryEx(processHandle, startingPoint, &resultContainer, sizeof(MEMORY_BASIC_INFORMATION));
+        *totalMemUsage += printProcessModule(resultContainer);
+        *modulesCount += 1;
+
+        if (resultContainer.State == MEM_COMMIT) {
+            newNode = createProcessInfoNode(resultContainer);
+            newNode->next = node;
+            node = newNode;
+            *readableModulesCount += 1;
+        }
+    }
+
+
+    CloseHandle(processHandle);
+
+    return node;
+}
+
+
+
 int main()
 {
-    if (printAllProcesses() == false) {
+    if (listAllProcesses() == false) {
         return 1;
     }
 
     // Getting the target PID
     long long targetPid = readLLUserInput("Please enter the PID you want to analyze the memory from.");
 
-    // long long value = readLLUserInput("Please enter the value to be located in the process memory.");
+    unsigned long modulesCount, readableModulesCount, totalMemUsage;
 
-    // int* address = getValueAddress((DWORD) targetPid);
-    unsigned long totalMemUsage;
-    unsigned long modulesCount = printProcessMemory(targetPid, &totalMemUsage);
+    InfoNode* readableModules = getReadableModules(targetPid, &modulesCount, &totalMemUsage, &readableModulesCount);
 
     char* humanReadableMemoryUsage = formatBytes(totalMemUsage);
-
     printf("-------------------------------------------------------------");
-    printf("\nTOTAL MEMORY USAGE FOR PID %llu: %s in %lu modules.\n\n", targetPid, humanReadableMemoryUsage, modulesCount);
+    printf("\nTOTAL MEMORY USAGE FOR PID %llu: %s in %lu modules (%lu readable).\n\n", targetPid, humanReadableMemoryUsage, modulesCount, readableModulesCount);
     free(humanReadableMemoryUsage);
 
-    // Get address: failed case
-    // if (address == NULL) {
-    //     printf("Failed to get the base memory address of the process %llu", targetPid);
-    //     printf(" (error code: %ld).\n", GetLastError());
-    //     return 1;
-    // }
+    printf("Selected memory blocks:\n");
+    printSelectedModules(readableModules);
 
-    // Else: do stuff here
+
+    long long value = readLLUserInput("Please enter the value to be located in the process memory.");
+
+    AddressNode* addresses = scanMemoryForValue(targetPid, readableModules, value, readableModulesCount);
+
+    printAddresses(addresses);
+
+
 
 
     return 0;
 }
+
+/*
+
+printf("Base address: %p\nAllocation base address (?): %p\nAllocation protection: %lu\nPartition ID: %d\nRegion size: %llu\nState: 0x%lx\nProtect: %lx\nType: %lx\n",
+        resultContainer.BaseAddress, resultContainer.AllocationBase, resultContainer.AllocationProtect, resultContainer.PartitionId,
+        resultContainer.RegionSize, resultContainer.State, resultContainer.Protect, resultContainer.Type);
+
+*/
+
