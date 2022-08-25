@@ -8,7 +8,7 @@
 int main() {
     srand(time(NULL));
 
-    char* mess = malloc(sizeof(char) * 20);
+    char* mess = (char*) malloc(sizeof(char) * 20);
     sprintf(mess, "This is a test!");
 
     int mystery;
@@ -16,8 +16,8 @@ int main() {
 
     while (running) {
         mystery = rand();
-    	  printf("PID: %lu, Message: \"%s\", Addresse: 0x%p\n", GetCurrentProcessId(), mess, mess);
-        printf("Mystery number: %d (size=%u bytes, address=0x%p).\n", mystery, sizeof(mystery), &mystery);
+    	  printf("PID: %lu, Message: \"%s\", Address: 0x%p\n", GetCurrentProcessId(), mess, mess);
+        printf("Mystery number: %d (size=%llu bytes, address=0x%p).\n", mystery, sizeof(mystery), &mystery);
 
         printf("Now waiting...\n");
 

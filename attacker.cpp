@@ -352,16 +352,5 @@ int main()
     printAddresses(addresses);
 
 
-
-
     return 0;
 }
-
-/*
-
-printf("Base address: %p\nAllocation base address (?): %p\nAllocation protection: %lu\nPartition ID: %d\nRegion size: %llu\nState: 0x%lx\nProtect: %lx\nType: %lx\n",
-        resultContainer.BaseAddress, resultContainer.AllocationBase, resultContainer.AllocationProtect, resultContainer.PartitionId,
-        resultContainer.RegionSize, resultContainer.State, resultContainer.Protect, resultContainer.Type);
-
-*/
-
